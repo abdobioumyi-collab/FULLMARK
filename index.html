@@ -27068,9 +27068,10 @@ async function mzAfterOAuth(){
       }
       try{ localStorage.removeItem('mz_owner_device'); }catch(e){}
     }
-    window.__mzKeepCover = true;
+    window.__mzKeepCover = false; /* إصلاح: الغطاء كان بيفضل شغال للأبد وبيمنع المالك يكتب الباسورد */
     openAdmin();
     mzShowOnly('mzOwnerPassBox');
+    try{ if(window.mzCoverOff) mzCoverOff(); }catch(e){}
     document.getElementById('mzOwnerEmail').textContent = email;
     try{ sessionStorage.setItem('mz_owner_email', email); }catch(e){}
     setTimeout(function(){ var i = document.getElementById('mzOwnerPass'); if(i) i.focus(); }, 200);
