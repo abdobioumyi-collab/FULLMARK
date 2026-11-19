@@ -19127,16 +19127,47 @@ window.mzaiSend=async function(){
       const defaultAskText=sentImgs.length>1?'استخرجي كل النص والمحتوى من الصور دي (اعتبريهم صفحات متتالية) وجهزيه للإضافة في الوحدة المختارة.':'استخرجي كل النص والمحتوى من الصورة دي وجهزيه للإضافة في الوحدة المختارة.';
       window.__mzaiGame = !!(typed && typeof mzNonEng==='function' && mzNonEng() && /صائد|اللعب[ةه]/.test(typed));
       const gameNote = window.__mzaiGame ? '\n\n(الأسئلة دي للعبة صائد الكلمات. صيغة السطر: السؤال | الإجابة الصح | غلط | غلط | غلط — أول إجابة بعد السؤال هي الصح دايمًا (بدون نجمة)، يعني correct_index = 0 لما المدرس يكتب بالصيغة دي. واعمل أسئلة اختيار من متعدد بإجابة صحيحة واحدة بس، والإجابات قصيرة جدًا — كلمة أو جملة صغيرة — لأنها بتنزل على الشاشة في لعبة.)' : '';
-      const j=await callAI({
+      const baseReq={
         token:adminToken,
         text:(typed||defaultAskText)+gameNote,
-        images:sentImgs,
         unit:uSel?uSel.text:'', stage:sSel?sSel.text:'',
         stages:(typeof STAGES!=='undefined'?STAGES:[]).map(s=>({key:s.key,label:s.label})),
         all_stages:(typeof STAGES!=='undefined'?STAGES:[]).map(s=>({key:s.key,label:s.label})),
         stats:statsSnapshot,
         subject:mzaiSubjectName()
-      },(statusText)=>{ retryStatus=statusText||null; wLabel.textContent=statusText||(readingLabel+Math.round((Date.now()-t0)/1000)+' ث'); });
+      };
+      const onSt=(statusText)=>{ retryStatus=statusText||null; wLabel.textContent=statusText||(readingLabel+Math.round((Date.now()-t0)/1000)+' ث'); };
+      let j;
+      if(sentImgs.length<=1){
+        j=await callAI(Object.assign({},baseReq,{images:sentImgs}),onSt);
+      }else{
+        /* ⭐ كل صورة بتتبعت كطلب منفصل وبالتوازي (٣ مع بعض) — طلب واحد ضخم بصور كتير كان بيتأخر لحد ما يتقطع 504 */
+        const total=sentImgs.length, results=new Array(total); let done=0, next=0;
+        const stp=()=>{ wLabel.textContent='بقرأ الصور… خلصت '+done+' من '+total+' — '+Math.round((Date.now()-t0)/1000)+' ث'; };
+        const worker=async()=>{
+          while(next<total){
+            const i=next++;
+            try{
+              const one=await callAI(Object.assign({},baseReq,{images:[sentImgs[i]],text:baseReq.text+(typed?'':'\n(صورة '+(i+1)+' من '+total+')')}));
+              results[i]={ok:true,j:one};
+            }catch(err){ results[i]={ok:false,err}; }
+            done++; stp();
+          }
+        };
+        await Promise.all(Array.from({length:Math.min(3,total)},worker));
+        const oks=results.filter(r=>r&&r.ok), bad=results.map((r,i)=>(r&&!r.ok)?i+1:0).filter(Boolean);
+        if(!oks.length) throw results[0].err;
+        const merged=[]; const byType={};
+        oks.forEach(r=>{ (Array.isArray(r.j.actions)?r.j.actions:[]).forEach(a=>{
+          if(a&&(a.type==='add_words'||a.type==='add_paragraphs'||a.type==='add_questions')){
+            const k=a.type, f=k==='add_words'?'words':k==='add_paragraphs'?'paragraphs':'questions';
+            if(byType[k]){ byType[k][f]=(byType[k][f]||[]).concat(a[f]||[]); return; }
+            byType[k]=Object.assign({},a); merged.push(byType[k]);
+          }else if(a) merged.push(a);
+        }); });
+        const replies=oks.map(r=>r.j.reply).filter(Boolean);
+        j={reply:replies.join('\n')+(bad.length?'\n⚠️ الصور رقم '+bad.join('، ')+' فشلت — ابعتيهم تاني.':''),actions:merged};
+      }
       mzaiBumpUsed(); // بنخصم المحاولة هنا بس — بعد ما الرد يرجع بنجاح فعلاً
       clearInterval(tick);
       if(sentImgs.length){ imgs=[]; $('mzaiFile').value=''; $('mzaiPrev').innerHTML=''; }
